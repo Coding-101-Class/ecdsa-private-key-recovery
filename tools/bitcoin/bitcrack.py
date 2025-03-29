@@ -40,6 +40,7 @@ import pybitcointools
 import sqlite3, os
 import MySQLdb
 import requests
+from bitcoin import privtopub, pubtoaddr
 
 logger = logging.getLogger(__name__)
 '''
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 def pause(t, critical=False):
     critical = False
     if not critical:
-        print t
+        print(t)
         return
     raw_input(t)
 
@@ -97,7 +98,7 @@ class BtcRpc(object):
                 logger.info("best block: %s"%self.rpc.getbestblockhash())
                 #logger.info("block count: %s" % self.rpc.getblockcount())
                 break
-            except Exception, e:
+            except Exception(e):
                 last_exc = e
             logger.info("trying to connect ...")
             time.sleep(2)
@@ -177,11 +178,11 @@ class BtcRpc(object):
 
     def get_scriptsigs(self, tx):
         trans = self.rpc.getrawtransaction(tx, 1)
-        print "trans",trans
+        print("trans", trans)
         # tbh we only need to check vout
         for index,vin in enumerate(trans['vin']):
             sig = vin.get("scriptSig")
-            print vin
+            print(vin)
             if sig:
                 asn_sig = sig.get("hex").decode("hex")
                 asn_sequence_tag_start = asn_sig.index(
@@ -198,14 +199,27 @@ class BtcRpc(object):
                        'index':index}
 
 import ecdsa
+import hashlib
+import base58
+import codecs
 from ecdsa import VerifyingKey
 from ecdsa.ecdsa import Signature
 
 curve = ecdsa.SECP256k1
 
+def double_hash(data):
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+
+def genPrivateKeyWIF(privateKeyHex):
+    privateKeyAndVersion = b'\x80' + bytes.fromhex(privateKeyHex)
+    checksum = double_hash(privateKeyAndVersion)[:4]
+    hashed = privateKeyAndVersion + checksum
+    return base58.b58encode(hashed).decode('utf-8')
+
 class BTCSignature(EcDsaSignature):
 
     def __init__(self, sig, h, pubkey, curve=ecdsa.SECP256k1):
+        print(pubkey)
         super(BTCSignature, self).__init__(sig, h, BTCSignature._fix_pubkey(pubkey), curve=curve)
 
     @staticmethod
@@ -213,7 +227,7 @@ class BTCSignature(EcDsaSignature):
         # SIG
         # PUSH 41
         # type 04
-        if p.startswith("\x01\x41\x04"):
+        if p.startswith(b"\x01\x41\x04"):
             return p[3:]
         return p
 
@@ -223,19 +237,19 @@ class BTCSignature(EcDsaSignature):
         #return self.recover_nonce(btcsig.sig, btcsig.h)
 
     def to_btc_pubkey(self):
-        return ('\04' + self.signingkey.verifying_key.to_string()).encode('hex')
+        return (b'\04' + self.signingkey.verifying_key.to_string()).hex()
 
     def to_btc_privkey(self):
-        return self.signingkey.to_string().encode("hex")
+        return self.signingkey.to_string().hex()
 
     def pubkey_to_address(self):
-        return pybitcointools.pubkey_to_address(self.to_btc_pubkey())
+        return pubtoaddr(self.to_btc_pubkey())
 
     def privkey_to_address(self):
-        return pybitcointools.privkey_to_address(self.to_btc_privkey())
+        return privtoaddr(self.to_btc_privkey())
 
     def privkey_to_wif(self):
-        return pybitcointools.encode_privkey(self.to_btc_privkey(), "wif")
+        return genPrivateKeyWIF(self.to_btc_privkey())
 
     def privkey_wif(self):
         return self.privkey_to_wif()
@@ -250,33 +264,33 @@ def selftest():
     sig1_hex = '304402200861cce1da15fc2dd79f1164c4f7b3e6c1526e7e8d85716578689ca9a5dc349d02206cf26e2776f7c94cafcee05cc810471ddca16fa864d13d57bee1c06ce39a3188'
     sig2_hex = '304402200861cce1da15fc2dd79f1164c4f7b3e6c1526e7e8d85716578689ca9a5dc349d02204ba75bdda43b3aab84b895cfd9ef13a477182657faaf286a7b0d25f0cb9a7de2'
 
-    t = asn1der.decode(sig1_hex.decode("hex"))
-    sig1 = Signature(long(t[0][0]), long(t[0][1]))
-    t = asn1der.decode(sig2_hex.decode("hex"))
-    sig2 = Signature(long(t[0][0]), long(t[0][1]))
+    t = asn1der.decode(bytes.fromhex(sig1_hex))
+    sig1 = Signature(int(t[0][0]), int(t[0][1]))
+    t = asn1der.decode(bytes.fromhex(sig2_hex))
+    sig2 = Signature(int(t[0][0]), int(t[0][1]))
 
-    print sig1.r, sig1.s
-    print sig2.r, sig2.s
-    print msghash1
-    print msghash2
-    print public_key_hex
+    print(sig1.r, sig1.s)
+    print(sig2.r, sig2.s)
+    print(msghash1)
+    print(msghash2)
+    print(public_key_hex)
 
 
 
-    sigx1 = BTCSignature(sig=sig1, h=long(msghash1, 16), pubkey=public_key_hex.decode("hex"))
-    sigx2 = BTCSignature(sig=(sig2.r, sig2.s), h=long(msghash2, 16), pubkey=public_key_hex.decode("hex"))
-    print "%r" % sigx1.recover_nonce_reuse(sigx2)
-    print sigx1.signingkey
-    print sigx1.to_btc_pubkey(), sigx1.to_btc_privkey()
-    print sigx1.pubkey_to_address(), sigx1.privkey_to_wif()
-    print sigx1.export_key()
-    print "----sigx2---"
+    sigx1 = BTCSignature(sig=sig1, h=int(msghash1, 16), pubkey=bytes.fromhex(public_key_hex))
+    sigx2 = BTCSignature(sig=(sig2.r, sig2.s), h=int(msghash2, 16), pubkey=bytes.fromhex(public_key_hex))
+    print("%r" % sigx1.recover_nonce_reuse(sigx2))
+    print(sigx1.signingkey)
+    print(sigx1.to_btc_pubkey(), sigx1.to_btc_privkey())
+    print(sigx1.pubkey_to_address(), sigx1.privkey_to_wif())
+    print(sigx1.export_key())
+    print("----sigx2---")
 
-    sig1 = EcDsaSignature(sig=sig1, h=msghash1.decode("hex"), pubkey=public_key_hex.decode("hex"))
-    sig2 = EcDsaSignature(sig=(sig2.r, sig2.s), h=msghash2.decode("hex"), pubkey=public_key_hex.decode("hex"))
-    print sig1.recover_nonce_reuse(sig2)
-    print sig1.export_key()
-    raw_input("--End of Selftest -- press any key to continue--")
+    sig1 = EcDsaSignature(sig=sig1, h=bytes.fromhex(msghash1), pubkey=bytes.fromhex(public_key_hex))
+    sig2 = EcDsaSignature(sig=(sig2.r, sig2.s), h=bytes.fromhex(msghash2), pubkey=bytes.fromhex(public_key_hex))
+    print(sig1.recover_nonce_reuse(sig2))
+    print(sig1.export_key())
+    input("--End of Selftest -- press any key to continue--")
 
 
 import pprint
@@ -344,8 +358,8 @@ def verify_vin(txid, index):
     #     \---------------------- pub orig?
     import pprint
     pprint.pprint(txdump)
-    print txdump['z'].decode("hex")
-    print int(txdump['z'],16)
+    print(txdump['z'].decode("hex"))
+    print(int(txdump['z'], 16))
     def fix_pubkey(p):
         if p.startswith("04"):
             return p[2:]
@@ -403,8 +417,8 @@ def verify_vin(txid, index):
 
     vk = VerifyingKey.from_string(txdump['pub'].decode("hex"), curve=curve)
     digest = txdump['z']
-    print repr(pubkey)
-    print repr(txdump['pub'])
+    print(repr(pubkey))
+    print(repr(txdump['pub']))
     z = int(digest.decode("hex"),16)
     verifies = vk.pubkey.verifies(z,Signature(sig[0],sig[1]))
     logger.debug("verify --> %s "%(verifies))
@@ -444,7 +458,7 @@ def recover_key_for_r(r):
             logger.debug("args: %r" % args)
             bsigs.append(verify_vin(txid,args['index']))
             logger.debug("txid: %r" % txid)
-        except Exception, ae: # assertionerror
+        except Exception(ae): # assertionerror
             logger.exception(ae)
 
 
@@ -452,15 +466,15 @@ def recover_key_for_r(r):
     # todo: might have multiple results! better yield results and filter already found ones..
     #       e.g. if multiple r but different pubkey
     import itertools
-    print bsigs
+    print(bsigs)
     ex= None
     for comb in itertools.combinations(bsigs, 2):
         try:
             comb[0].recover_from_btcsig(comb[1])
             return comb[0]
-        except AssertionError, e:
+        except AssertionError(e):
             ex = e
-            print e
+            print(e)
         pause("--nextbtcsig--")
     if ex:
         raise ex
@@ -498,10 +512,10 @@ def get_sigpair_from_csv(csv_in, start=0, skip_to_tx=None, want_tx=[]):
         for nr,line in enumerate(f):
             if nr<start:
                 if nr%100000==0:
-                    print "skip",nr,f.tell()
+                    print("skip", nr, f.tell())
                 continue
             if nr % 10000000 == 0:
-                print "10m", nr
+                print("10m", nr)
             try:
                 # read data
                 cols = line.split(";",1)
@@ -512,7 +526,7 @@ def get_sigpair_from_csv(csv_in, start=0, skip_to_tx=None, want_tx=[]):
                     # skip this entry - already in db
                     continue
                 if skip_to_tx and skip_entries:
-                    print "skiptx",nr, tx
+                    print("skiptx", nr, tx)
                     continue
                 if want_tx and tx not in want_tx:
                     continue
@@ -524,11 +538,11 @@ def get_sigpair_from_csv(csv_in, start=0, skip_to_tx=None, want_tx=[]):
                 sig['tx'] = tx
                 sig['nr'] = nr
                 yield sig
-            except ValueError, ve:
+            except ValueError(ve):
                 #print tx,repr(ve)
                 pass
-            except Exception, e:
-                print tx, repr(e)
+            except Exception(e):
+                print(tx, repr(e))
 
 def find_fixed_id_for_tx_s(f, _tx, _s):
     f.seek(0)
@@ -545,7 +559,7 @@ def getrawtx(txid):
         try:
             rpc = BtcRpc("http://lala:lolo@127.0.0.1:8332")
             return rpc.rpc.getrawtransaction(txid, 1)
-        except Exception , e:
+        except Exception(e):
             pass
     raise e
 
@@ -580,7 +594,7 @@ def dump_tx_ecdsa(txid, i):
         elif hashcode_txt == 'SINGLE':
             hashcode = 3
         else:
-            print hashcode_txt
+            print(hashcode_txt)
             logger.warning("xx %s %4d ERROR_UNHANDLED_HASHCODE" % (txid, hashcode_txt))
             raise
     else:
@@ -609,9 +623,9 @@ def check_balances():
         "select address from bitcoin.privkeys")
     for a in cursor.fetchall():
         try:
-            print "%s - %s"%(a, get_balance_for_address(a))
-        except Exception, e:
-            print "%s - %s" % (a, e)
+            print("%s - %s"%(a, get_balance_for_address(a)))
+        except Exception(e):
+            print("%s - %s" % (a, e))
     raw_input("-->done")
 
 def recover_privkey():
@@ -629,7 +643,7 @@ def recover_privkey():
 
         try:
             rsig = recover_key_for_r(r)
-            print "->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r
+            print("->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r)
             recovered_sigs.append(rsig)
             cursor_insert.execute("select privkey from bitcoin.privkeys where r=unhex(%s)",(r,))
             if not cursor_insert.rowcount:
@@ -639,20 +653,20 @@ def recover_privkey():
                 pause("--duplicate--")
             #cursor.executemany("UPDATE bitcoin.privkeys set address=%s, privkey=%s where r=unhex(%s)",(rsig.address, rsig.privkey_wif,r))
             pause("YAY")
-        except (Exception,AssertionError) as ae:
-            print ae
+        except (Exception, AssertionError) as ae:
+            print(ae)
             #raise ae
-        print recovered_sigs
+        print(recovered_sigs)
         pause("--next_r---")
 
 
 
-    print ""
-    print ""
-    print "                      Address                               Privkey                            r"
+    print("")
+    print("")
+    print("                      Address                               Privkey                            r")
     for rsig in recovered_sigs:
-        print "Privkey recovered: ", rsig.address(), rsig.privkey_wif(), rsig.sig.r
-    print ""
+        print ("Privkey recovered: ", rsig.address(), rsig.privkey_wif(), rsig.sig.r)
+    print ("")
     raise
 
 
@@ -682,7 +696,7 @@ class DbMysql(object):
             self.cursor.execute('SELECT * FROM stats WHERE `key`=%s LIMIT 1', (key,))
             for row in self.cursor.fetchall():
                 return row[1] if len(row[1]) else default
-        except Exception, e:
+        except Exception(e):
             return default
 
         return default
@@ -731,8 +745,7 @@ def import_csv_to_mysql(csv_in):
     db.close()
 
 if __name__=="__main__":
-    logging.basicConfig(loglevel=logging.DEBUG, format="%(funcName)-20s -  %(message)s")
-    logger.setLevel(logging.DEBUG)
+    logging.basicConfig(format="%(funcName)-20s -  %(message)s")
     logger.warning("#" * 40)
     logger.warning("#" + "WARNING: experimental script. no warranty. you've been warned!")
     logger.warning("#" * 40)
@@ -741,11 +754,11 @@ if __name__=="__main__":
     args = sys.argv[1:]
     if not len(args):
         time.sleep(0.5) # too lazy to look up how to flush the logger
-        print "USAGE: <mode> <args>"
-        print "\n"
-        print "examples:   this.py [selftest] import tx_in.csv.tmp  # import tx_in.csv.tmp to mysql db"
-        print "            this.py recover                          # recover nonce_reuse signatures from mysql db"
-        print "\n\n MYSQL config see var: MYSQL_PARMS "
+        print("USAGE: <mode> <args>")
+        print("\n")
+        print("examples:   this.py [selftest] import tx_in.csv.tmp  # import tx_in.csv.tmp to mysql db")
+        print("            this.py recover                          # recover nonce_reuse signatures from mysql db")
+        print("\n\n MYSQL config see var: MYSQL_PARMS ")
         sys.exit(1)
 
 
@@ -781,18 +794,18 @@ if __name__=="__main__":
         """
         for r in dup_r:
             r = r.lower()
-            print "r->",r
+            print("r->", r)
             try:
                 rsig = recover_key_for_r(r)
-                print "->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r
+                print("->Privkey recovered: ", rsig.address(), rsig.privkey_wif(), r)
                 recovered_sigs.append(rsig)
-            except Exception, ae:
-                print repr(ae)
+            except Exception(ae):
+                print(repr(ae))
                 raise ae
 
-        print ""
-        print ""
-        print "                      Address                               Privkey                            r"
+        print("")
+        print("")
+        print("                      Address                               Privkey                            r")
         for rsig in recovered_sigs:
-            print "Privkey recovered: ",rsig.address(), rsig.privkey_wif(), rsig.sig.r
-        print ""
+            print("Privkey recovered: ",rsig.address(), rsig.privkey_wif(), rsig.sig.r)
+        print("")

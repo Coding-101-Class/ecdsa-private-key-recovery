@@ -55,7 +55,7 @@ def bignum_to_hex(val, nbits=256):
         return "0" + ret
     return ret
 
-def to_dsakey(secret_key, _from=Crypto.PublicKey.DSA, _to=Cryptodome.PublicKey.DSA):
+def to_dsakey(secret_key, _from=Crypto.PublicKey.DSA, _to=Crypto.PublicKey.DSA):
     if _from == Cryptodome.PublicKey.DSA:
         return _to.construct((int(secret_key._key['y']),
                               int(secret_key._key['g']),
@@ -68,7 +68,7 @@ def to_dsakey(secret_key, _from=Crypto.PublicKey.DSA, _to=Cryptodome.PublicKey.D
                           secret_key.key.q,
                           secret_key.key.x))
 
-def to_ecdsakey(secret_key, _from=ecdsa.SigningKey, _to=Cryptodome.PublicKey.ECC):
+def to_ecdsakey(secret_key, _from=ecdsa.SigningKey, _to=Crypto.PublicKey.ECC):
     # pointx, pointy, d
     return _to.import_key(secret_key.to_der())
 
