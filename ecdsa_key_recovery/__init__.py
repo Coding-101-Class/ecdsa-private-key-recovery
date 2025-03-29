@@ -7,9 +7,8 @@ EcDSA/DSA Nonce Reuse Private Key Recovery
 
 import Crypto
 from Crypto.PublicKey import DSA
-from Crypto.PublicKey.pubkey import inverse
-import Cryptodome.PublicKey.DSA
-import Cryptodome.PublicKey.ECC
+import Crypto.PublicKey.DSA
+import Crypto.PublicKey.ECC
 
 import ecdsa
 from ecdsa import SigningKey
@@ -19,16 +18,35 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# py2to3 compat
-import six  #py2to3 compat
-import sys
-IS_PY2 = sys.version_info[0] == 2
+def inverse(a, n):
+    """
+    Calculate the modular multiplicative inverse of a modulo n using the Extended Euclidean Algorithm.
+    
+    Args:
+        a: The number to find the inverse of
+        n: The modulus
+        
+    Returns:
+        The modular multiplicative inverse of a modulo n
+        
+    Raises:
+        ValueError: If a and n are not coprime (no inverse exists)
+    """
+    def extended_gcd(a, b):
+        if a == 0:
+            return b, 0, 1
+        gcd, x1, y1 = extended_gcd(b % a, a)
+        x = y1 - (b // a) * x1
+        y = x1
+        return gcd, x, y
+    
+    gcd, x, _ = extended_gcd(a, n)
+    if gcd != 1:
+        raise ValueError(f"No modular multiplicative inverse exists for {a} modulo {n}")
+    return x % n
 
 def bytes_fromhex(str):
-    if IS_PY2:
-        return str.decode("hex")
     return bytes.fromhex(str)
-
 
 def bignum_to_hex(val, nbits=256):
     ret = hex((val + (1 << nbits)) % (1 << nbits)).rstrip("L").lstrip("0x")
@@ -37,7 +55,6 @@ def bignum_to_hex(val, nbits=256):
         return "0" + ret
     return ret
 
-# noinspection PyProtectedMember,PyProtectedMember,PyProtectedMember,PyProtectedMember,PyProtectedMember
 def to_dsakey(secret_key, _from=Crypto.PublicKey.DSA, _to=Cryptodome.PublicKey.DSA):
     if _from == Cryptodome.PublicKey.DSA:
         return _to.construct((int(secret_key._key['y']),
@@ -51,20 +68,17 @@ def to_dsakey(secret_key, _from=Crypto.PublicKey.DSA, _to=Cryptodome.PublicKey.D
                           secret_key.key.q,
                           secret_key.key.x))
 
-
 def to_ecdsakey(secret_key, _from=ecdsa.SigningKey, _to=Cryptodome.PublicKey.ECC):
     # pointx, pointy, d
     return _to.import_key(secret_key.to_der())
 
-
-class SignatureParameter(object):
+class SignatureParameter:
     """
     DSA signature parameters.
     """
 
     def __init__(self, r, s):
         """
-
         :param r: Signature Param r
         :param s: Signature Param s
         """
@@ -79,15 +93,13 @@ class SignatureParameter(object):
         """
         return self.r, self.s
 
-
-class RecoverableSignature(object):
+class RecoverableSignature:
     """
     A BaseClass for a recoverable EC/DSA Signature.
     """
 
     def __init__(self, sig, h, pubkey):
         """
-
         :param sig: tuple(long r, long s)
         :param h: bytestring message digest
         :param pubkey: pubkey object
@@ -99,12 +111,7 @@ class RecoverableSignature(object):
         self.x = None
 
     def __repr__(self):
-        return "<%s 0x%x sig=%s public=%s private=%s >" % (self.__class__.__name__,
-                                                           hash(self),
-                                                           "(%s,%s)" % (
-                                                               str(self.sig.r)[:10] + "…", str(self.sig.s)[:10] + "…"),
-                                                           "✔" if self.pubkey else '⨯',
-                                                           "✔" if self.x else '⨯')
+        return f"<{self.__class__.__name__} 0x{hash(self):x} sig=({str(self.sig.r)[:10]}…, {str(self.sig.s)[:10]}…) public={'✔' if self.pubkey else '⨯'} private={'✔' if self.x else '⨯'}>"
 
     def _load_signature(self, sig):
         if all(hasattr(sig, att) for att in ('r', 's')):
@@ -116,9 +123,9 @@ class RecoverableSignature(object):
             "Invalid Signature Format! - Expected tuple(long r,long s) or SignatureParamter(long r, long s)")
 
     def _load_hash(self, h):
-        if isinstance(h, six.integer_types):
+        if isinstance(h, int):
             return h
-        elif isinstance(h, (six.string_types, six.binary_type)):
+        elif isinstance(h, (str, bytes)):
             return Crypto.Util.number.bytes_to_long(h)
 
         raise ValueError(
@@ -135,16 +142,15 @@ class RecoverableSignature(object):
         :return: self
         """
         raise NotImplementedError(
-            "%s cannot be called directly" % self.__class__.__name__)
+            f"{self.__class__.__name__} cannot be called directly")
 
     def export_key(self, *args, **kwargs):
         raise NotImplementedError(
-            "%s cannot be called directly" % self.__class__.__name__)
+            f"{self.__class__.__name__} cannot be called directly")
 
     def import_key(self, *args, **kwargs):
         raise NotImplementedError(
-            "%s cannot be called directly" % self.__class__.__name__)
-
+            f"{self.__class__.__name__} cannot be called directly")
 
 class DsaSignature(RecoverableSignature):
     """
@@ -152,7 +158,7 @@ class DsaSignature(RecoverableSignature):
     """
 
     def __init__(self, sig, h, pubkey):
-        super(DsaSignature, self).__init__(sig, h, pubkey)
+        super().__init__(sig, h, pubkey)
         logger.debug("%r - check verifies.." % self)
         # check sig verifies hash
         assert self.pubkey.verify(self.h, self.sig.tuple)
@@ -191,17 +197,12 @@ class DsaSignature(RecoverableSignature):
                                               other.sig.s, self.pubkey.q) % self.pubkey.q
         self.x = ((self.k * self.sig.s - self.h) *
                   inverse(self.sig.r, self.pubkey.q)) % self.pubkey.q
-        # other.k, other.x = self.k, self.x   # update other object as well?
         return self
 
-
 class EcDsaSignature(RecoverableSignature):
-
     def __init__(self, sig, h, pubkey, curve=ecdsa.SECP256k1):
         self.curve = curve  # must be set before __init__ calls __load_pubkey
-
-        super(EcDsaSignature, self).__init__(sig, h, pubkey)
-
+        super().__init__(sig, h, pubkey)
         self.signingkey = None
         self.n = self.pubkey.generator.order()
 
@@ -212,7 +213,7 @@ class EcDsaSignature(RecoverableSignature):
     def _load_pubkey(self, pubkey):
         if isinstance(pubkey, ecdsa.ecdsa.Public_key):
             return pubkey
-        elif isinstance(pubkey, (six.string_types, six.binary_type)):
+        elif isinstance(pubkey, (str, bytes)):
             return ecdsa.VerifyingKey.from_string(pubkey, curve=self.curve).pubkey
         return pubkey
 
@@ -223,7 +224,7 @@ class EcDsaSignature(RecoverableSignature):
             return self.signingkey.to_pem()
         elif ext_format == "DER":
             return self.signingkey.to_der()
-        raise ValueError("Unknown format '%s'" % ext_format)
+        raise ValueError(f"Unknown format '{ext_format}'")
 
     @staticmethod
     def import_key(encoded, passphrase=None):
